@@ -7,7 +7,7 @@ const CollibraExporter = require('./collibraExporter');
 const displayWelcome = () => {
   console.clear();
   console.log('╔════════════════════════════════════════╗');
-  console.log('║   Collibra Community Export Tool      ║');
+  console.log('║   Collibra Community Export Tool       ║');
   console.log('╚════════════════════════════════════════╝\n');
 };
 
