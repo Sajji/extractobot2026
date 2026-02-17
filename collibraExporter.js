@@ -6,6 +6,32 @@ class CollibraExporter {
     this.client = client;
   }
 
+  /**
+   * Format responsibility owner for export
+   */
+  formatResponsibilityOwner(owner) {
+    if (!owner) return null;
+    
+    if (owner.resourceType === 'User') {
+      return {
+        type: 'User',
+        userName: owner.userName,
+        fullName: owner.fullName,
+        firstName: owner.firstName,
+        lastName: owner.lastName,
+        emailAddress: owner.emailAddress
+      };
+    } else if (owner.resourceType === 'UserGroup') {
+      return {
+        type: 'UserGroup',
+        name: owner.name,
+        description: owner.description
+      };
+    }
+    
+    return { type: owner.resourceType, id: owner.id };
+  }
+
   async exportCommunity(community, options = {}) {
     const {
       includeAssets = true,
@@ -140,15 +166,38 @@ class CollibraExporter {
 
               if (includeResponsibilities) {
                 try {
-                  const responsibilities = await this.client.getAssetResponsibilities(asset.id);
-                  assetData.responsibilities = (responsibilities.results || []).map(resp => ({
-                    role: resp.role?.name,
-                    user: resp.user?.userName,
-                    resourceType: resp.resourceType
-                  }));
+                  // Get responsibilities with enriched user details and inheritance
+                  const responsibilitiesData = await this.client.getAssetResponsibilitiesEnriched(asset.id, true);
+                  
+                  assetData.responsibilities = {
+                    summary: responsibilitiesData.summary,
+                    direct: responsibilitiesData.direct.map(r => ({
+                      role: r.role?.name,
+                      owner: this.formatResponsibilityOwner(r.owner),
+                      baseResource: r.baseResource?.name
+                    })),
+                    inherited: {
+                      fromCommunity: responsibilitiesData.inherited.fromCommunity.map(r => ({
+                        role: r.role?.name,
+                        owner: this.formatResponsibilityOwner(r.owner),
+                        baseResource: r.baseResource?.name,
+                        baseResourceType: r.baseResource?.resourceType
+                      })),
+                      fromDomain: responsibilitiesData.inherited.fromDomain.map(r => ({
+                        role: r.role?.name,
+                        owner: this.formatResponsibilityOwner(r.owner),
+                        baseResource: r.baseResource?.name,
+                        baseResourceType: r.baseResource?.resourceType
+                      }))
+                    }
+                  };
                 } catch (error) {
                   console.error(`      Error fetching responsibilities for ${asset.name}:`, error.message);
-                  assetData.responsibilities = [];
+                  assetData.responsibilities = { 
+                    summary: { total: 0, direct: 0, inherited: 0 }, 
+                    direct: [], 
+                    inherited: { fromCommunity: [], fromDomain: [] } 
+                  };
                 }
               }
 

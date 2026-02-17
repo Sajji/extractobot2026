@@ -73,15 +73,7 @@ class CollibraGraphQLExporter {
       }
     ` : '';
 
-    const responsibilitiesFragment = includeResponsibilities ? `
-      responsibilities {
-        role { name }
-        user {
-          fullName
-          userName
-        }
-      }
-    ` : '';
+    const responsibilitiesFragment = '';  // Fetched separately via REST API with inheritance
 
     const relationsFragment = includeRelations ? `
       outgoingRelations {
@@ -125,6 +117,7 @@ class CollibraGraphQLExporter {
         domain {
           id
           name
+          type { name }
           parent {
             id
             name
@@ -243,6 +236,32 @@ class CollibraGraphQLExporter {
   }
 
   /**
+   * Format responsibility owner for export
+   */
+  formatResponsibilityOwner(owner) {
+    if (!owner) return null;
+    
+    if (owner.resourceType === 'User') {
+      return {
+        type: 'User',
+        userName: owner.userName,
+        fullName: owner.fullName,
+        firstName: owner.firstName,
+        lastName: owner.lastName,
+        emailAddress: owner.emailAddress
+      };
+    } else if (owner.resourceType === 'UserGroup') {
+      return {
+        type: 'UserGroup',
+        name: owner.name,
+        description: owner.description
+      };
+    }
+    
+    return { type: owner.resourceType, id: owner.id };
+  }
+
+  /**
    * Transform GraphQL asset to export format
    */
   transformAsset(asset) {
@@ -254,7 +273,8 @@ class CollibraGraphQLExporter {
       status: asset.status?.name,
       domain: {
         id: asset.domain?.id,
-        name: asset.domain?.name
+        name: asset.domain?.name,
+        type: asset.domain?.type?.name
       },
       community: {
         id: asset.domain?.parent?.id,
@@ -320,14 +340,8 @@ class CollibraGraphQLExporter {
       transformed.attributes = allAttributes;
     }
 
-    // Add responsibilities
-    if (asset.responsibilities && asset.responsibilities.length > 0) {
-      transformed.responsibilities = asset.responsibilities.map(resp => ({
-        role: resp.role?.name,
-        userName: resp.user?.userName,
-        fullName: resp.user?.fullName
-      }));
-    }
+    // Note: Responsibilities are fetched separately via REST API with inheritance
+    // and added to the asset in exportCommunityByName method
 
     // Add relations
     const allRelations = [];
@@ -376,7 +390,6 @@ class CollibraGraphQLExporter {
     const {
       includeAttributes = true,
       includeRelations = true,
-      includeResponsibilities = false,
       outputDir = './exports'
     } = options;
 
@@ -409,7 +422,7 @@ class CollibraGraphQLExporter {
         whereClause,
         includeAttributes,
         includeRelations,
-        includeResponsibilities
+        includeResponsibilities: false
       });
 
       // Transform assets
@@ -485,7 +498,6 @@ class CollibraGraphQLExporter {
     const {
       includeAttributes = true,
       includeRelations = true,
-      includeResponsibilities = false,
       outputDir = './exports'
     } = options;
 
@@ -505,7 +517,7 @@ class CollibraGraphQLExporter {
         whereClause,
         includeAttributes,
         includeRelations,
-        includeResponsibilities
+        includeResponsibilities: false  // We'll fetch these separately
       });
 
       // Transform assets
@@ -530,7 +542,6 @@ class CollibraGraphQLExporter {
           totalDomains: 1,
           totalAssets: transformedAssets.length,
           assetsWithAttributes: transformedAssets.filter(a => a.attributes && a.attributes.length > 0).length,
-          assetsWithResponsibilities: transformedAssets.filter(a => a.responsibilities && a.responsibilities.length > 0).length,
           assetsWithRelations: transformedAssets.filter(a => a.relations && a.relations.length > 0).length
         }
       };
@@ -551,7 +562,6 @@ class CollibraGraphQLExporter {
       console.log(`📊 Statistics:`);
       console.log(`   - Assets: ${exportData.statistics.totalAssets}`);
       console.log(`   - With Attributes: ${exportData.statistics.assetsWithAttributes}`);
-      console.log(`   - With Responsibilities: ${exportData.statistics.assetsWithResponsibilities}`);
       console.log(`   - With Relations: ${exportData.statistics.assetsWithRelations}`);
       console.log(`📁 Output file: ${filepath}`);
       

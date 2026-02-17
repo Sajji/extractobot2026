@@ -8,8 +8,7 @@ const CollibraGraphQLExporter = require('./collibraGraphQLExporter');
 const displayWelcome = () => {
   console.clear();
   console.log('╔════════════════════════════════════════╗');
-  console.log('║   Collibra Community Export Tool       ║');
-  console.log('║          REST API + GraphQL            ║');
+  console.log('║   Collibra Export Tool - GraphQL       ║');
   console.log('╚════════════════════════════════════════╝\n');
 };
 
@@ -52,76 +51,36 @@ const selectCommunities = async (communities) => {
   return selectedIndices.map(index => communities[index]);
 };
 
-const configureExportOptions = async (useGraphQL = false) => {
-  const questions = [
+const configureExportOptions = async () => {
+  const answers = await inquirer.prompt([
     {
       type: 'confirm',
       name: 'includeAssets',
       message: 'Include assets?',
       default: true
+    },
+    {
+      type: 'confirm',
+      name: 'includeAttributes',
+      message: 'Include all asset attributes (string, numeric, date, etc.)?',
+      default: true,
+      when: (answers) => answers.includeAssets
+    },
+    {
+      type: 'confirm',
+      name: 'includeRelations',
+      message: 'Include asset relations (incoming & outgoing)?',
+      default: true,
+      when: (answers) => answers.includeAssets
+    },
+    {
+      type: 'input',
+      name: 'outputDir',
+      message: 'Output directory:',
+      default: './exports'
     }
-  ];
+  ]);
 
-  if (useGraphQL) {
-    // GraphQL-specific options
-    questions.push(
-      {
-        type: 'confirm',
-        name: 'includeAttributes',
-        message: 'Include all asset attributes (string, numeric, date, etc.)?',
-        default: true,
-        when: (answers) => answers.includeAssets
-      },
-      {
-        type: 'confirm',
-        name: 'includeRelations',
-        message: 'Include asset relations (incoming & outgoing)?',
-        default: true,
-        when: (answers) => answers.includeAssets
-      },
-      {
-        type: 'confirm',
-        name: 'includeResponsibilities',
-        message: 'Include asset responsibilities (stewards, owners)?',
-        default: false,
-        when: (answers) => answers.includeAssets
-      }
-    );
-  } else {
-    // REST API options
-    questions.push(
-      {
-        type: 'confirm',
-        name: 'includeAttributes',
-        message: 'Include asset attributes?',
-        default: true,
-        when: (answers) => answers.includeAssets
-      },
-      {
-        type: 'confirm',
-        name: 'includeRelations',
-        message: 'Include asset relations?',
-        default: false,
-        when: (answers) => answers.includeAssets
-      },
-      {
-        type: 'confirm',
-        name: 'includeResponsibilities',
-        message: 'Include asset responsibilities (stewards, owners, etc.)?',
-        default: false,
-        when: (answers) => answers.includeAssets
-      }
-    );
-  }
-
-  questions.push({
-    type: 'input',
-    name: 'outputDir',
-    message: 'Output directory:',
-    default: './exports'
-  });
-
-  const answers = await inquirer.prompt(questions);
   return answers;
 };
 
@@ -144,60 +103,138 @@ const main = async () => {
       process.exit(1);
     }
 
-    // Choose export method
-    const { exportMethod } = await inquirer.prompt([
+    // GraphQL Export Flow (only option now)
+    const { exportType } = await inquirer.prompt([
       {
         type: 'list',
-        name: 'exportMethod',
-        message: 'Choose export method:',
+        name: 'exportType',
+        message: 'What would you like to export?',
         choices: [
-          { name: '⚡ GraphQL (Recommended - Faster, single query per community)', value: 'graphql' },
-          { name: '🔧 REST API (Traditional - Multiple API calls)', value: 'rest' },
+          { name: 'Community (browse and select from list)', value: 'community' },
+          { name: 'Domain (browse and select from list)', value: 'domain' },
           { name: '❌ Exit', value: 'exit' }
         ]
       }
     ]);
 
-    if (exportMethod === 'exit') {
+    if (exportType === 'exit') {
       console.log('Goodbye!');
       process.exit(0);
     }
 
-    const useGraphQL = exportMethod === 'graphql';
+    let targetName;
 
-    if (useGraphQL) {
-      // GraphQL Export Flow
-      console.log('\n📋 Enter community or domain name to export:\n');
-      
-      const { exportType } = await inquirer.prompt([
-        {
-          type: 'list',
-          name: 'exportType',
-          message: 'What would you like to export?',
-          choices: [
-            { name: 'Community (all domains in a community)', value: 'community' },
-            { name: 'Domain (single domain only)', value: 'domain' },
-            { name: 'Back to method selection', value: 'back' }
-          ]
+      if (exportType === 'community') {
+        // Fetch communities and show in a list
+        console.log('\n📋 Fetching communities...\n');
+        const communitiesResponse = await client.getCommunities();
+        const communities = communitiesResponse.results || [];
+
+        if (communities.length === 0) {
+          console.log('No communities found in your Collibra instance.');
+          process.exit(0);
         }
-      ]);
 
-      if (exportType === 'back') {
-        return main(); // Restart
+        // Separate root and all communities
+        const rootCommunities = communities.filter(c => !c.parent);
+        
+        // Ask if user wants to see all or just roots
+        const { showAllCommunities } = await inquirer.prompt([
+          {
+            type: 'list',
+            name: 'showAllCommunities',
+            message: 'Which communities do you want to see?',
+            choices: [
+              { name: `Root communities only (${rootCommunities.length})`, value: false },
+              { name: `All communities including subcommunities (${communities.length})`, value: true }
+            ]
+          }
+        ]);
+
+        const communitiesToShow = showAllCommunities ? communities : rootCommunities;
+
+        // Display communities table
+        displayCommunities(communitiesToShow);
+
+        // Let user select from list
+        const { selectedIndex } = await inquirer.prompt([
+          {
+            type: 'list',
+            name: 'selectedIndex',
+            message: 'Select community to export:',
+            choices: communitiesToShow.map((comm, index) => {
+              // Show parent info for subcommunities if showing all
+              let display = comm.name;
+              if (showAllCommunities && comm.parent) {
+                display = `${comm.name} (child of: ${comm.parent.name})`;
+              }
+              if (comm.description) {
+                display = `${display} - ${comm.description.substring(0, 40)}`;
+              }
+              return {
+                name: display,
+                value: index,
+                short: comm.name
+              };
+            }),
+            pageSize: 15
+          }
+        ]);
+
+        targetName = communitiesToShow[selectedIndex].name;
+        const selectedCommunity = communitiesToShow[selectedIndex];
+        console.log(`\n✓ Selected: ${targetName}`);
+        
+        // Show note about subcommunities
+        if (!selectedCommunity.parent) {
+          console.log('ℹ️  Note: This export will include all subcommunities automatically.\n');
+        } else {
+          console.log('ℹ️  Note: This export will include any subcommunities of this community.\n');
+        }
+
+      } else {
+        // Domain export - fetch and show list
+        console.log('\n📋 Fetching domains...\n');
+        
+        const domainsResponse = await client.makeRequest('/domains', { 
+          limit: 1000, 
+          sortField: 'NAME', 
+          sortOrder: 'ASC',
+          excludeMeta: true 
+        });
+        const domains = domainsResponse.results || [];
+
+        if (domains.length === 0) {
+          console.log('No domains found in your Collibra instance.');
+          process.exit(0);
+        }
+
+        console.log(`Found ${domains.length} domains\n`);
+
+        // Let user select domain from list
+        const { selectedDomainIndex } = await inquirer.prompt([
+          {
+            type: 'list',
+            name: 'selectedDomainIndex',
+            message: 'Select domain to export:',
+            choices: domains.map((domain, index) => ({
+              name: domain.description 
+                ? `${domain.name} - ${domain.description.substring(0, 50)}`
+                : domain.name,
+              value: index,
+              short: domain.name
+            })),
+            pageSize: 15
+          }
+        ]);
+
+        targetName = domains[selectedDomainIndex].name;
+        console.log(`\n✓ Selected: ${targetName}\n`);
       }
 
-      const { targetName } = await inquirer.prompt([
-        {
-          type: 'input',
-          name: 'targetName',
-          message: `Enter ${exportType} name (exact match):`,
-          validate: (input) => input.trim().length > 0 ? true : 'Name cannot be empty'
-        }
-      ]);
-
       // Configure export options
-      console.log('\n⚙️  Export Options\n');
-      const exportOptions = await configureExportOptions(true);
+      console.log('⚙️  Export Options\n');
+      const exportOptions = await configureExportOptions();
 
       // Confirm export
       const { confirm } = await inquirer.prompt([
@@ -223,90 +260,6 @@ const main = async () => {
       } else {
         await graphQLExporter.exportDomainByName(targetName, exportOptions);
       }
-
-    } else {
-      // REST API Export Flow
-      console.log('📋 Fetching communities...\n');
-      const communitiesResponse = await client.getCommunities();
-      const communities = communitiesResponse.results || [];
-
-      if (communities.length === 0) {
-        console.log('No communities found in your Collibra instance.');
-        process.exit(0);
-      }
-
-      // Display communities
-      displayCommunities(communities);
-
-      // Main menu
-      const { action } = await inquirer.prompt([
-        {
-          type: 'list',
-          name: 'action',
-          message: 'What would you like to do?',
-          choices: [
-            { name: 'Select specific communities to export', value: 'select' },
-            { name: 'Export all communities', value: 'all' },
-            { name: 'Exit', value: 'exit' }
-          ]
-        }
-      ]);
-
-      if (action === 'exit') {
-        console.log('Goodbye!');
-        process.exit(0);
-      }
-
-      // Select communities
-      let selectedCommunities;
-      if (action === 'select') {
-        selectedCommunities = await selectCommunities(communities);
-        if (selectedCommunities.length === 0) {
-          console.log('No communities selected. Exiting.');
-          process.exit(0);
-        }
-      } else {
-        selectedCommunities = communities;
-      }
-
-      // Configure export options
-      console.log('\n⚙️  Export Options\n');
-      const exportOptions = await configureExportOptions(false);
-
-      // Confirm export
-      const { confirm } = await inquirer.prompt([
-        {
-          type: 'confirm',
-          name: 'confirm',
-          message: `Ready to export ${selectedCommunities.length} communit${selectedCommunities.length === 1 ? 'y' : 'ies'} via REST API?`,
-          default: true
-        }
-      ]);
-
-      if (!confirm) {
-        console.log('Export cancelled.');
-        process.exit(0);
-      }
-
-      // Perform REST export
-      console.log('\n🚀 Starting REST API export...\n');
-      const exporter = new CollibraExporter(client);
-      
-      if (selectedCommunities.length === 1) {
-        await exporter.exportCommunity(selectedCommunities[0], exportOptions);
-      } else {
-        const results = await exporter.exportMultipleCommunities(selectedCommunities, exportOptions);
-        
-        console.log('\n📊 Export Summary:');
-        results.forEach(result => {
-          const status = result.success ? '✓' : '✗';
-          console.log(`  ${status} ${result.community}`);
-          if (!result.success) {
-            console.log(`    Error: ${result.error}`);
-          }
-        });
-      }
-    }
 
     console.log('\n✨ All done!\n');
 

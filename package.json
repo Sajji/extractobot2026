@@ -5,8 +5,6 @@
   "main": "index.js",
   "scripts": {
     "start": "node indexGraphQL.js",
-    "start:rest": "node index.js",
-    "start:graphql": "node indexGraphQL.js",
     "test": "node testConnection.js",
     "test:graphql": "node testGraphQL.js",
     "view": "node viewExport.js",

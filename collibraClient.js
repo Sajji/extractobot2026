@@ -206,6 +206,146 @@ class CollibraClient {
     return communities[0];
   }
 
+  /**
+   * Batch fetch user details by IDs
+   */
+  async getUsersByIds(userIds) {
+    if (!userIds || userIds.length === 0) {
+      return [];
+    }
+
+    try {
+      const userParams = userIds.map(id => `userId=${id}`).join('&');
+      const response = await this.makeRequest(`/users?${userParams}&limit=1000`);
+      return response.results || [];
+    } catch (error) {
+      console.error('Failed to fetch user details:', error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Batch fetch user group details by IDs
+   */
+  async getUserGroupsByIds(groupIds) {
+    if (!groupIds || groupIds.length === 0) {
+      return [];
+    }
+
+    try {
+      const groupParams = groupIds.map(id => `userGroupId=${id}`).join('&');
+      const response = await this.makeRequest(`/userGroups?${groupParams}&limit=1000`);
+      return response.results || [];
+    } catch (error) {
+      console.error('Failed to fetch user group details:', error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Get responsibilities with full user details and inheritance info
+   */
+  async getAssetResponsibilitiesEnriched(assetId, includeInherited = true) {
+    try {
+      // Get responsibilities with inheritance
+      const response = await this.makeRequest(
+        `/responsibilities?resourceIds=${assetId}&includeInherited=${includeInherited}&limit=1000`
+      );
+      
+      let responsibilities = response.results || [];
+
+      // Extract unique user and group IDs
+      const userIds = new Set();
+      const groupIds = new Set();
+
+      responsibilities.forEach(r => {
+        if (r.owner?.id) {
+          if (r.owner.resourceType === 'User') {
+            userIds.add(r.owner.id);
+          } else if (r.owner.resourceType === 'UserGroup') {
+            groupIds.add(r.owner.id);
+          }
+        }
+      });
+
+      // Batch fetch user and group details
+      const [users, groups] = await Promise.all([
+        this.getUsersByIds(Array.from(userIds)),
+        this.getUserGroupsByIds(Array.from(groupIds))
+      ]);
+
+      // Create lookup maps
+      const usersMap = new Map();
+      users.forEach(user => usersMap.set(user.id, user));
+
+      const groupsMap = new Map();
+      groups.forEach(group => groupsMap.set(group.id, group));
+
+      // Enrich responsibilities with full details
+      responsibilities = responsibilities.map(r => {
+        const enriched = { ...r };
+        
+        if (r.owner?.id) {
+          if (r.owner.resourceType === 'User') {
+            const userDetails = usersMap.get(r.owner.id);
+            if (userDetails) {
+              enriched.owner = {
+                ...r.owner,
+                userName: userDetails.userName,
+                firstName: userDetails.firstName,
+                lastName: userDetails.lastName,
+                fullName: `${userDetails.firstName || ''} ${userDetails.lastName || ''}`.trim() || userDetails.userName,
+                emailAddress: userDetails.emailAddress
+              };
+            }
+          } else if (r.owner.resourceType === 'UserGroup') {
+            const groupDetails = groupsMap.get(r.owner.id);
+            if (groupDetails) {
+              enriched.owner = {
+                ...r.owner,
+                name: groupDetails.name,
+                description: groupDetails.description
+              };
+            }
+          }
+        }
+        
+        return enriched;
+      });
+
+      // Categorize by inheritance
+      const direct = responsibilities.filter(r => r.baseResource?.id === assetId);
+      const inherited = responsibilities.filter(r => r.baseResource?.id !== assetId);
+      const inheritedFromCommunity = inherited.filter(r => r.baseResource?.resourceType === 'Community');
+      const inheritedFromDomain = inherited.filter(r => r.baseResource?.resourceType === 'Domain');
+
+      return {
+        all: responsibilities,
+        direct,
+        inherited: {
+          all: inherited,
+          fromCommunity: inheritedFromCommunity,
+          fromDomain: inheritedFromDomain
+        },
+        summary: {
+          total: responsibilities.length,
+          direct: direct.length,
+          inherited: inherited.length,
+          fromCommunity: inheritedFromCommunity.length,
+          fromDomain: inheritedFromDomain.length
+        }
+      };
+    } catch (error) {
+      console.error('Failed to fetch enriched responsibilities:', error.message);
+      return {
+        all: [],
+        direct: [],
+        inherited: { all: [], fromCommunity: [], fromDomain: [] },
+        summary: { total: 0, direct: 0, inherited: 0, fromCommunity: 0, fromDomain: 0 }
+      };
+    }
+  }
+
   // Pagination helper - fetches all pages of results
   async fetchAllPages(endpoint, params = {}, itemsKey = 'results') {
     const allResults = [];

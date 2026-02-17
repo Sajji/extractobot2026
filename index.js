@@ -7,7 +7,7 @@ const CollibraExporter = require('./collibraExporter');
 const displayWelcome = () => {
   console.clear();
   console.log('╔════════════════════════════════════════╗');
-  console.log('║   Collibra Community Export Tool       ║');
+  console.log('║   Collibra Community Export Tool      ║');
   console.log('╚════════════════════════════════════════╝\n');
 };
 
@@ -75,7 +75,7 @@ const configureExportOptions = async () => {
     {
       type: 'confirm',
       name: 'includeResponsibilities',
-      message: 'Include asset responsibilities (stewards, owners, etc.)?',
+      message: 'Include asset responsibilities (users & roles with inheritance)?',
       default: false,
       when: (answers) => answers.includeAssets
     },
